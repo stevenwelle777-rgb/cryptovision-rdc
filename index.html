@@ -1,66 +1,182 @@
+const express = require("express");
+const bodyParser = require("body-parser");
+const fs = require("fs");
+const app = express();
+
+app.use(bodyParser.json());
+
+let db = {
+  users: [],
+  posts: []
+};
+
+// Charger données
+if (fs.existsSync("db.json")) {
+  db = JSON.parse(fs.readFileSync("db.json"));
+}
+
+// Sauvegarde
+function saveDB() {
+  fs.writeFileSync("db.json", JSON.stringify(db, null, 2));
+}
+
+// -------- AUTH --------
+app.post("/register", (req, res) => {
+  const { username, password } = req.body;
+
+  if (db.users.find(u => u.username === username)) {
+    return res.send("Utilisateur existe déjà");
+  }
+
+  db.users.push({ username, password });
+  saveDB();
+  res.send("Compte créé");
+});
+
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+
+  const user = db.users.find(u => u.username === username && u.password === password);
+  if (!user) return res.send("Erreur login");
+
+  res.send("OK");
+});
+
+// -------- POSTS --------
+app.get("/posts", (req, res) => {
+  res.json(db.posts);
+});
+
+app.post("/posts", (req, res) => {
+  const { user, content } = req.body;
+
+  const post = {
+    id: Date.now(),
+    user,
+    content,
+    likes: 0,
+    comments: []
+  };
+
+  db.posts.unshift(post);
+  saveDB();
+  res.json(post);
+});
+
+// -------- LIKE --------
+app.post("/like/:id", (req, res) => {
+  const post = db.posts.find(p => p.id == req.params.id);
+  if (post) {
+    post.likes++;
+    saveDB();
+  }
+  res.send("liked");
+});
+
+// -------- COMMENT --------
+app.post("/comment/:id", (req, res) => {
+  const post = db.posts.find(p => p.id == req.params.id);
+  if (post) {
+    post.comments.push(req.body.comment);
+    saveDB();
+  }
+  res.send("commented");
+});
+
+// -------- FRONTEND --------
+app.get("/", (req, res) => {
+  res.send(`
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CryptoVision RDC</title>
+<title>Mini Facebook Pro</title>
 <style>
-body {
-  margin:0;
-  font-family: Arial, sans-serif;
-  background:#0f172a;
-  color:white;
-}
-header {
-  background:#111827;
-  padding:20px;
-  text-align:center;
-}
-button {
-  padding:10px 20px;
-  background:#22c55e;
-  border:none;
-  color:white;
-  cursor:pointer;
-  border-radius:5px;
-}
-section {
-  padding:40px;
-  text-align:center;
-}
-.card {
-  background:#1e293b;
-  padding:20px;
-  margin:15px;
-  border-radius:10px;
-}
+body { font-family: Arial; background:#f0f2f5; }
+.container { width:500px; margin:auto; }
+.post { background:white; padding:10px; margin:10px 0; }
+button { margin-top:5px; }
 </style>
 </head>
 <body>
 
-<header>
-<h1>CryptoVision RDC</h1>
-<p>Apprenez. Analysez. Investissez intelligemment.</p>
-<button>Commencer</button>
-</header>
+<div class="container">
+<h2>Mini Social App</h2>
 
-<section>
-<h2>Nos Services</h2>
-<div class="card">
-<h3>Analyses Crypto</h3>
-<p>Analyses hebdomadaires du marché.</p>
+<input id="user" placeholder="Nom">
+<textarea id="content" placeholder="Post"></textarea>
+<button onclick="addPost()">Publier</button>
+
+<div id="feed"></div>
 </div>
 
-<div class="card">
-<h3>Formation Débutant</h3>
-<p>Comprendre Bitcoin et Ethereum facilement.</p>
-</div>
+<script>
+async function loadPosts() {
+  const res = await fetch('/posts');
+  const posts = await res.json();
 
-<div class="card">
-<h3>Alertes Marché</h3>
-<p>Recevez des notifications stratégiques.</p>
-</div>
-</section>
+  const feed = document.getElementById("feed");
+  feed.innerHTML = "";
+
+  posts.forEach(p => {
+    const div = document.createElement("div");
+    div.className = "post";
+
+    div.innerHTML = \`
+      <b>\${p.user}</b><br>
+      \${p.content}<br>
+      ❤️ \${p.likes}
+      <button onclick="likePost(\${p.id})">Like</button>
+
+      <div>
+        <input id="c\${p.id}" placeholder="Commentaire">
+        <button onclick="commentPost(\${p.id})">Envoyer</button>
+      </div>
+
+      <small>\${p.comments.join("<br>")}</small>
+    \`;
+
+    feed.appendChild(div);
+  });
+}
+
+async function addPost() {
+  const user = document.getElementById("user").value;
+  const content = document.getElementById("content").value;
+
+  await fetch('/posts', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ user, content })
+  });
+
+  loadPosts();
+}
+
+async function likePost(id) {
+  await fetch('/like/' + id, { method:'POST' });
+  loadPosts();
+}
+
+async function commentPost(id) {
+  const input = document.getElementById("c"+id);
+  await fetch('/comment/' + id, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ comment: input.value })
+  });
+
+  loadPosts();
+}
+
+loadPosts();
+</script>
 
 </body>
 </html>
+  `);
+});
+
+// -------- START --------
+app.listen(3000, () => {
+  console.log("Serveur lancé sur http://localhost:3000");
+});
